@@ -1,0 +1,328 @@
+// PostgreSQL production schema for Gym ERP
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Gym {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  email     String?
+  phone     String?
+  address   String?
+  city      String?  @default("Chennai")
+  state     String?  @default("Tamil Nadu")
+  pincode   String?
+  logoUrl   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  settings            GymSettings?
+  users               User[]
+  members             Member[]
+  plans               MembershipPlan[]
+  memberships         Membership[]
+  invoices            Invoice[]
+  payments            Payment[]
+  refunds             Refund[]
+  attendances         Attendance[]
+  trainers            Trainer[]
+  trainerAssignments  TrainerAssignment[]
+  expenses            Expense[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+}
+
+model GymSettings {
+  id                 String   @id @default(cuid())
+  gymId              String   @unique
+  receiptPrefix      String   @default("REC-")
+  nextReceiptNumber  Int      @default(1001)
+  currency           String   @default("INR")
+  currencySymbol     String   @default("₹")
+  timezone           String   @default("Asia/Kolkata")
+  taxPercentage      Float    @default(0)
+  taxNumber          String?
+  whatsappTemplate   String?  @default("Hi {name}, your gym membership at {gym} is expiring on {expiryDate}. Please contact us to renew your membership. Thank you!")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id           String    @id @default(cuid())
+  gymId        String
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         String    @default("OWNER_ADMIN")
+  isActive     Boolean   @default(true)
+  phone        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  gym       Gym        @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  auditLogs AuditLog[]
+
+  @@index([gymId])
+}
+
+model Member {
+  id                   String    @id @default(cuid())
+  gymId                String
+  memberCode           String
+  fullName             String
+  mobile               String
+  email                String?
+  gender               String?
+  dateOfBirth          DateTime?
+  address              String?
+  emergencyContactName String?
+  emergencyContactPhone String?
+  photoUrl             String?
+  joiningDate          DateTime  @default(now())
+  status               String    @default("ACTIVE")
+  notes                String?
+  isArchived           Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  gym                Gym                 @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  memberships        Membership[]
+  invoices           Invoice[]
+  payments           Payment[]
+  attendances        Attendance[]
+  trainerAssignments TrainerAssignment[]
+
+  @@unique([gymId, memberCode])
+  @@index([gymId, mobile])
+  @@index([gymId, status])
+}
+
+model MembershipPlan {
+  id           String   @id @default(cuid())
+  gymId        String
+  name         String
+  durationDays Int
+  price        Int
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  gym         Gym          @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+
+  @@index([gymId])
+}
+
+model Membership {
+  id         String   @id @default(cuid())
+  gymId      String
+  memberId   String
+  planId     String
+  startDate  DateTime
+  expiryDate DateTime
+  basePrice  Int
+  discount   Int      @default(0)
+  finalPrice Int
+  status     String   @default("ACTIVE")
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  gym      Gym            @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member   Member         @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  plan     MembershipPlan @relation(fields: [planId], references: [id])
+  invoices Invoice[]
+
+  @@index([gymId, memberId])
+  @@index([gymId, expiryDate])
+}
+
+model Invoice {
+  id            String   @id @default(cuid())
+  gymId         String
+  invoiceNumber String
+  memberId      String
+  membershipId  String?
+  dueDate       DateTime
+  totalAmount   Int
+  discount      Int      @default(0)
+  netAmount     Int
+  paidAmount    Int      @default(0)
+  balanceDue    Int
+  status        String   @default("PENDING")
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  gym        Gym         @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member     Member      @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  membership Membership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  payments   Payment[]
+  refunds    Refund[]
+
+  @@unique([gymId, invoiceNumber])
+  @@index([gymId, memberId])
+  @@index([gymId, status])
+}
+
+model Payment {
+  id             String   @id @default(cuid())
+  gymId          String
+  receiptNumber  String
+  invoiceId      String
+  memberId       String
+  amount         Int
+  paymentMethod  String
+  transactionRef String?
+  paymentDate    DateTime @default(now())
+  notes          String?
+  receivedById   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  gym     Gym      @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  member  Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  refunds Refund[]
+
+  @@unique([gymId, receiptNumber])
+  @@index([gymId, memberId])
+  @@index([gymId, paymentDate])
+}
+
+model Refund {
+  id           String   @id @default(cuid())
+  gymId        String
+  paymentId    String
+  invoiceId    String
+  amount       Int
+  reason       String
+  refundDate   DateTime @default(now())
+  approvedById String?
+  createdAt    DateTime @default(now())
+
+  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([gymId])
+}
+
+model Attendance {
+  id          String   @id @default(cuid())
+  gymId       String
+  memberId    String
+  date        DateTime
+  checkInTime DateTime @default(now())
+  notes       String?
+
+  gym    Gym    @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([gymId, memberId, date])
+  @@index([gymId, date])
+}
+
+model Trainer {
+  id                 String   @id @default(cuid())
+  gymId              String
+  trainerCode        String
+  fullName           String
+  mobile             String
+  email              String?
+  specialization     String?
+  salary             Int?
+  paymentArrangement String?
+  joiningDate        DateTime @default(now())
+  status             String   @default("ACTIVE")
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  gym         Gym                 @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  assignments TrainerAssignment[]
+
+  @@unique([gymId, trainerCode])
+  @@index([gymId])
+}
+
+model TrainerAssignment {
+  id        String    @id @default(cuid())
+  gymId     String
+  trainerId String
+  memberId  String
+  startDate DateTime  @default(now())
+  endDate   DateTime?
+  status    String    @default("ACTIVE")
+  notes     String?
+  createdAt DateTime  @default(now())
+
+  gym     Gym     @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  trainer Trainer @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([gymId, trainerId])
+  @@index([gymId, memberId])
+}
+
+model Expense {
+  id              String   @id @default(cuid())
+  gymId           String
+  category        String
+  description     String
+  amount          Int
+  paymentMethod   String
+  referenceNumber String?
+  expenseDate     DateTime @default(now())
+  notes           String?
+  recordedById    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@index([gymId, expenseDate])
+  @@index([gymId, category])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  gymId     String
+  type      String
+  title     String
+  message   String
+  memberId  String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  gym Gym @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@index([gymId, isRead])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  gymId      String
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  details    String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  gym  Gym   @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([gymId, createdAt])
+}
