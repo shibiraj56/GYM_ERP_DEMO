@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "node scripts/prepare-prisma.js && prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
+    "postinstall": "node scripts/prepare-prisma.js && prisma generate",
     "test": "node --test tests/gym-erp.test.js",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

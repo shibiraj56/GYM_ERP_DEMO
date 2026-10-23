@@ -2,9 +2,8 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Dumbbell, ShieldCheck, Lock, Mail, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Dumbbell, Lock, Mail, ArrowRight, AlertTriangle, ExternalLink, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,8 +34,8 @@ export default function LoginPage() {
 
       router.push('/dashboard');
       router.refresh();
-    } catch (err) {
-      setError('Connection error. Please try again.');
+    } catch (err: any) {
+      setError(err?.message || 'Connection error. Please try again.');
       setLoading(false);
     }
   }
@@ -45,6 +44,13 @@ export default function LoginPage() {
     setEmail(demoEmail);
     setPassword(demoPass);
   }
+
+  const isDbConfigError =
+    error.includes('database') ||
+    error.includes('DATABASE_URL') ||
+    error.includes('Vercel') ||
+    error.includes('PostgreSQL') ||
+    error.includes('tables');
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 sm:p-6 lg:p-8 relative overflow-hidden">
@@ -70,8 +76,25 @@ export default function LoginPage() {
         <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="rounded-xl bg-rose-500/10 border border-rose-500/20 p-3.5 text-xs text-rose-400 font-medium">
-                {error}
+              <div className="rounded-xl bg-rose-500/10 border border-rose-500/20 p-3.5 text-xs text-rose-400 font-medium space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500 mt-0.5" />
+                  <p className="leading-relaxed">{error}</p>
+                </div>
+                {isDbConfigError && (
+                  <div className="pt-2 border-t border-rose-500/20 flex justify-between items-center text-[11px]">
+                    <span className="text-slate-400">Need help configuring Vercel DB?</span>
+                    <a
+                      href="/api/health"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:underline flex items-center gap-1 font-semibold"
+                    >
+                      <span>Inspect Health</span>
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                )}
               </div>
             )}
 
@@ -153,10 +176,21 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Footer info */}
-        <p className="text-center text-xs text-slate-600 mt-6">
-          Equipped with Role-Based Access Control • Coimbatore, Tamil Nadu
-        </p>
+        {/* Footer info & Diagnostic Link */}
+        <div className="text-center mt-6 space-y-2">
+          <p className="text-xs text-slate-600">
+            Equipped with Role-Based Access Control • Coimbatore, Tamil Nadu
+          </p>
+          <a
+            href="/api/health"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-blue-400 transition-colors"
+          >
+            <Activity className="h-3 w-3 text-emerald-500" />
+            <span>Check Database & Server Status</span>
+          </a>
+        </div>
       </div>
     </div>
   );
