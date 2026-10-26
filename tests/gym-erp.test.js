@@ -9,6 +9,8 @@ test('Gym ERP Test Suite: Billing, Membership & Verification', async (t) => {
   let testGym;
   let testPlan;
   let testMember;
+  let gym2;
+  const createdMemberIds = [];
 
   await t.test('1. Database Tenant & Gym Settings Verification', async () => {
     testGym = await prisma.gym.findFirst({
@@ -55,6 +57,7 @@ test('Gym ERP Test Suite: Billing, Membership & Verification', async (t) => {
         status: 'ACTIVE',
       },
     });
+    createdMemberIds.push(testMember.id);
 
     assert.ok(testMember.id, 'Member must be created successfully');
 
@@ -212,10 +215,158 @@ test('Gym ERP Test Suite: Billing, Membership & Verification', async (t) => {
     assert.ok(!isNaN(netBalance), 'Net balance must not be NaN');
   });
 
-  // Cleanup test member
-  await prisma.attendance.deleteMany({ where: { memberId: testMember.id } });
-  await prisma.payment.deleteMany({ where: { memberId: testMember.id } });
-  await prisma.invoice.deleteMany({ where: { memberId: testMember.id } });
-  await prisma.membership.deleteMany({ where: { memberId: testMember.id } });
-  await prisma.member.delete({ where: { id: testMember.id } });
+  // --- NEW WORKFLOW & ISOLATION TESTS FOR MANUAL MEMBER IDS ---
+
+  await t.test('9. Manual Member ID Creation & Exact Preservation', async () => {
+    // 1. Create a member with manually entered existing code 'YF-0250'
+    const manualMember1 = await prisma.member.create({
+      data: {
+        gymId: testGym.id,
+        memberCode: 'YF-0250',
+        fullName: 'Karthik Existing Joinee',
+        mobile: `98421${Math.floor(10000 + Math.random() * 90000)}`,
+        status: 'ACTIVE',
+      },
+    });
+    createdMemberIds.push(manualMember1.id);
+
+    assert.strictEqual(manualMember1.memberCode, 'YF-0250', 'Entered manual Member ID must be preserved exactly as YF-0250');
+
+    // 2. Create another member with custom alphanumeric code 'TRP001'
+    const manualMember2 = await prisma.member.create({
+      data: {
+        gymId: testGym.id,
+        memberCode: 'TRP001',
+        fullName: 'Priya Existing Joinee',
+        mobile: `98421${Math.floor(10000 + Math.random() * 90000)}`,
+        status: 'ACTIVE',
+      },
+    });
+    createdMemberIds.push(manualMember2.id);
+
+    assert.strictEqual(manualMember2.memberCode, 'TRP001', 'Entered manual Member ID must be preserved exactly as TRP001');
+  });
+
+  await t.test('10. Duplicate Member ID Prevention Within Same Gym Tenant', async () => {
+    // A duplicate check query should find the existing member
+    const existing = await prisma.member.findFirst({
+      where: {
+        gymId: testGym.id,
+        memberCode: 'YF-0250',
+        isArchived: false,
+      },
+    });
+    assert.ok(existing, 'Query must detect existing Member ID YF-0250');
+
+    // Attempting to insert another member with 'YF-0250' in the same gym must be rejected by unique constraint
+    await assert.rejects(
+      async () => {
+        await prisma.member.create({
+          data: {
+            gymId: testGym.id,
+            memberCode: 'YF-0250',
+            fullName: 'Collision Test Joinee',
+            mobile: `98421${Math.floor(10000 + Math.random() * 90000)}`,
+            status: 'ACTIVE',
+          },
+        });
+      },
+      /Unique constraint failed/i,
+      'Must reject duplicate Member ID in the same gym tenant'
+    );
+  });
+
+  await t.test('11. Cross-Tenant Member ID Isolation', async () => {
+    // Create a secondary gym tenant 'FitCore Chennai'
+    gym2 = await prisma.gym.upsert({
+      where: { slug: 'fitcore-chennai-test' },
+      update: {},
+      create: {
+        name: 'FitCore Chennai Studio',
+        slug: 'fitcore-chennai-test',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+      },
+    });
+
+    // In gym2, creating a member with the SAME ID 'YF-0250' must succeed because of tenant isolation
+    const gym2Member = await prisma.member.create({
+      data: {
+        gymId: gym2.id,
+        memberCode: 'YF-0250',
+        fullName: 'Chennai Athlete with Same Local Code',
+        mobile: `98421${Math.floor(10000 + Math.random() * 90000)}`,
+        status: 'ACTIVE',
+      },
+    });
+    createdMemberIds.push(gym2Member.id);
+
+    assert.strictEqual(gym2Member.gymId, gym2.id);
+    assert.strictEqual(gym2Member.memberCode, 'YF-0250', 'Different gym can use same member code YF-0250');
+
+    // Querying members for testGym must NOT return gym2's member
+    const testGymMembers = await prisma.member.findMany({
+      where: { gymId: testGym.id, memberCode: 'YF-0250' },
+    });
+    assert.strictEqual(testGymMembers.length, 1);
+    assert.strictEqual(testGymMembers[0].fullName, 'Karthik Existing Joinee');
+
+    const gym2Members = await prisma.member.findMany({
+      where: { gymId: gym2.id, memberCode: 'YF-0250' },
+    });
+    assert.strictEqual(gym2Members.length, 1);
+    assert.strictEqual(gym2Members[0].fullName, 'Chennai Athlete with Same Local Code');
+  });
+
+  await t.test('12. Preservation of Existing Member IDs on Update & Renewal', async () => {
+    const member = await prisma.member.findFirst({
+      where: { gymId: testGym.id, memberCode: 'YF-0250' },
+    });
+    assert.ok(member);
+
+    // 1. Update member profile (change name, address, notes)
+    const updated = await prisma.member.update({
+      where: { id: member.id },
+      data: {
+        fullName: 'Karthik Existing Joinee (Updated)',
+        notes: 'Updated personal training notes',
+      },
+    });
+    assert.strictEqual(updated.memberCode, 'YF-0250', 'Member ID must remain unchanged on profile update');
+
+    // 2. Perform a renewal on this member
+    const renewalMembership = await prisma.membership.create({
+      data: {
+        gymId: testGym.id,
+        memberId: member.id,
+        planId: testPlan.id,
+        startDate: new Date(),
+        expiryDate: addDays(new Date(), testPlan.durationDays),
+        basePrice: testPlan.price,
+        finalPrice: testPlan.price,
+        status: 'ACTIVE',
+      },
+    });
+    assert.ok(renewalMembership.id);
+
+    // Fetch member again to guarantee memberCode is intact
+    const afterRenewal = await prisma.member.findUnique({
+      where: { id: member.id },
+    });
+    assert.strictEqual(afterRenewal.memberCode, 'YF-0250', 'Member ID must be preserved exactly after renewal');
+  });
+
+  // Cleanup all created test records
+  for (const memberId of createdMemberIds) {
+    await prisma.attendance.deleteMany({ where: { memberId } });
+    await prisma.payment.deleteMany({ where: { memberId } });
+    await prisma.invoice.deleteMany({ where: { memberId } });
+    await prisma.membership.deleteMany({ where: { memberId } });
+    await prisma.member.delete({ where: { id: memberId } }).catch(() => {});
+  }
+
+  if (gym2) {
+    await prisma.member.deleteMany({ where: { gymId: gym2.id } });
+    await prisma.gym.delete({ where: { id: gym2.id } }).catch(() => {});
+  }
 });

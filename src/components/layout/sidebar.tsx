@@ -13,7 +13,6 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  Sparkles,
   ShieldCheck,
   UserCheck,
 } from 'lucide-react';
@@ -41,7 +40,7 @@ export function Sidebar({ userRole = 'OWNER_ADMIN', userName = 'Senthil Nathan',
       title: 'Members',
       href: '/members',
       icon: Users,
-      roles: ['OWNER_ADMIN', 'RECEPTIONIST'],
+      roles: ['OWNER_ADMIN', 'RECEPTIONIST', 'TRAINER'],
     },
     {
       title: 'Membership Plans',

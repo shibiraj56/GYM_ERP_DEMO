@@ -49,8 +49,9 @@ export function MemberListClient({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
-  // Add Member Form State
+  // Add Member Form State with manual Member ID
   const [formData, setFormData] = useState({
+    memberCode: '',
     fullName: '',
     mobile: '',
     email: '',
@@ -86,11 +87,30 @@ export function MemberListClient({
     setIsSubmitting(true);
     setErrorMessage('');
 
+    const cleanCode = formData.memberCode.trim();
+    if (!cleanCode) {
+      setErrorMessage('Member ID is required');
+      setIsSubmitting(false);
+      return;
+    }
+
+    // UI-level duplicate Member ID pre-check within the current gym
+    const localDuplicate = members.find(
+      (m) => m.memberCode.trim().toLowerCase() === cleanCode.toLowerCase()
+    );
+    if (localDuplicate) {
+      setErrorMessage(
+        `Member ID "${cleanCode}" is already in use by ${localDuplicate.fullName} in this gym. Please choose a unique Member ID.`
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const res = await fetch('/api/members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, memberCode: cleanCode }),
       });
 
       const data = await res.json();
@@ -105,6 +125,7 @@ export function MemberListClient({
       router.refresh();
       // Reset form
       setFormData({
+        memberCode: '',
         fullName: '',
         mobile: '',
         email: '',
@@ -200,7 +221,7 @@ export function MemberListClient({
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Search by name, ID (MEM-...), or phone..."
+            placeholder="Search by name, ID (e.g. YF-0250, TRP001), or phone..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 bg-white text-xs sm:text-sm placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-sm"
@@ -214,7 +235,8 @@ export function MemberListClient({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                <th className="py-3.5 px-4">Member</th>
+                <th className="py-3.5 px-4">Member ID</th>
+                <th className="py-3.5 px-4">Athlete Name</th>
                 <th className="py-3.5 px-4">Mobile & Contact</th>
                 <th className="py-3.5 px-4">Current Plan</th>
                 <th className="py-3.5 px-4">Expiry Date</th>
@@ -225,7 +247,7 @@ export function MemberListClient({
             <tbody className="divide-y divide-slate-100 text-sm">
               {filteredMembers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-slate-400 text-xs">
+                  <td colSpan={7} className="py-12 text-center text-slate-400 text-xs">
                     No members found matching your search filters.
                   </td>
                 </tr>
@@ -245,6 +267,12 @@ export function MemberListClient({
                       className="hover:bg-slate-50/60 transition-colors group"
                     >
                       <td className="py-3.5 px-4">
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200">
+                          {member.memberCode}
+                        </span>
+                      </td>
+
+                      <td className="py-3.5 px-4">
                         <div className="flex items-center gap-3">
                           <div className="h-9 w-9 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-xs border border-blue-200 shrink-0">
                             {member.fullName.charAt(0)}
@@ -256,9 +284,6 @@ export function MemberListClient({
                             >
                               {member.fullName}
                             </Link>
-                            <span className="font-mono text-xs text-slate-500">
-                              {member.memberCode}
-                            </span>
                           </div>
                         </div>
                       </td>
@@ -335,7 +360,7 @@ export function MemberListClient({
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         title="Register New Gym Member"
-        description="Enroll member, set up membership plan, and log initial payment transaction"
+        description="Enter member ID, personal details, select plan, and record initial payment"
         maxWidth="2xl"
       >
         <form onSubmit={handleAddMember} className="space-y-4">
@@ -346,12 +371,24 @@ export function MemberListClient({
             </div>
           )}
 
-          {/* Section 1: Member Personal Details */}
+          {/* Section 1: Member Personal Details & Member ID */}
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
-              1. Personal Details
+              1. Member Identification & Personal Details
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
+                <Input
+                  label="Member ID / Code *"
+                  required
+                  placeholder="e.g. YF-0250, TRP001, MEM-1008"
+                  value={formData.memberCode}
+                  onChange={(e) => setFormData({ ...formData, memberCode: e.target.value })}
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Enter the existing member code or custom ID used by your gym (e.g. YF-0250, TRP001). Must be unique within your gym.
+                </p>
+              </div>
               <Input
                 label="Full Name *"
                 required

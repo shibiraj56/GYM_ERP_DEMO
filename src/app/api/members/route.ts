@@ -74,6 +74,7 @@ export async function POST(request: Request) {
     const body = await request.json();
 
     const {
+      memberCode,
       fullName,
       mobile,
       email,
@@ -92,6 +93,14 @@ export async function POST(request: Request) {
       notes,
     } = body;
 
+    const cleanMemberCode = String(memberCode || '').trim();
+    if (!cleanMemberCode) {
+      return NextResponse.json(
+        { error: 'Member ID is required' },
+        { status: 400 }
+      );
+    }
+
     if (!fullName || !mobile || !planId) {
       return NextResponse.json(
         { error: 'Full name, mobile number, and membership plan are required' },
@@ -99,15 +108,29 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check duplicate mobile in same gym
-    const existing = await prisma.member.findFirst({
+    // Check duplicate Member ID in same gym tenant
+    const existingCode = await prisma.member.findFirst({
+      where: { gymId: session.gymId, memberCode: cleanMemberCode, isArchived: false },
+    });
+
+    if (existingCode) {
+      return NextResponse.json(
+        {
+          error: `Member ID "${cleanMemberCode}" is already in use by ${existingCode.fullName}. Please choose a unique Member ID.`,
+        },
+        { status: 409 }
+      );
+    }
+
+    // Check duplicate mobile in same gym tenant
+    const existingMobile = await prisma.member.findFirst({
       where: { gymId: session.gymId, mobile: mobile.trim(), isArchived: false },
     });
 
-    if (existing) {
+    if (existingMobile) {
       return NextResponse.json(
         {
-          error: `A member with mobile number ${mobile} is already registered (${existing.fullName} - ${existing.memberCode})`,
+          error: `A member with mobile number ${mobile} is already registered (${existingMobile.fullName} - ${existingMobile.memberCode})`,
         },
         { status: 409 }
       );
@@ -122,10 +145,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Selected membership plan is invalid' }, { status: 400 });
     }
 
-    // Auto-generate Member Code (e.g. MEM-1008)
-    const count = await prisma.member.count({ where: { gymId: session.gymId } });
-    const memberCode = `MEM-${1001 + count}`;
-
     const memberStart = startDate ? new Date(startDate) : new Date();
     const calculatedExpiry = customExpiryDate
       ? new Date(customExpiryDate)
@@ -136,13 +155,21 @@ export async function POST(request: Request) {
     const paidAmt = Math.min(finalPrice, Number(initialPaymentAmount));
     const balanceDue = finalPrice - paidAmt;
 
-    // Execute in Prisma Transaction for atomicity
+    // Execute in Prisma Transaction for atomicity and race-condition prevention
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Create Member
+      // Re-verify Member ID uniqueness within transaction to prevent race conditions
+      const inTxDuplicate = await tx.member.findFirst({
+        where: { gymId: session.gymId, memberCode: cleanMemberCode },
+      });
+      if (inTxDuplicate) {
+        throw new Error(`Member ID "${cleanMemberCode}" is already in use in this gym.`);
+      }
+
+      // 1. Create Member with exactly preserved Member ID
       const member = await tx.member.create({
         data: {
           gymId: session.gymId,
-          memberCode,
+          memberCode: cleanMemberCode,
           fullName: fullName.trim(),
           mobile: mobile.trim(),
           email: email?.trim() || null,
@@ -246,7 +273,7 @@ export async function POST(request: Request) {
           entityType: 'MEMBER',
           entityId: member.id,
           details: JSON.stringify({
-            memberCode,
+            memberCode: cleanMemberCode,
             fullName: member.fullName,
             plan: plan.name,
             paidAmount: paidAmt,
@@ -260,6 +287,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, ...result });
   } catch (error: any) {
     console.error('Error creating member:', error);
+    if (error?.code === 'P2002' || error?.message?.includes('already in use')) {
+      return NextResponse.json(
+        { error: error.message || 'Member ID is already in use in this gym.' },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
   }
 }
